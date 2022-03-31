@@ -1,0 +1,3 @@
+# Files generated from TLA+ model checking
+*/states/
+*.out

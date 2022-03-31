@@ -1,0 +1,8 @@
+version: "3"
+
+services:
+  ivy:
+    build: .
+    container_name: ivy
+    volumes:
+      - ./ivy:/src
