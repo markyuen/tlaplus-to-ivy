@@ -78,7 +78,7 @@ after init {
 relation member(R:replica, Q:quorum)
 axiom [quorum_intersection]
     forall Q1:quorum, Q2:quorum.
-        exists R:replica. (member(R, Q1) & member(R, Q2))
+        exists R:replica. member(R, Q1) & member(R, Q2)
 
 relation leader(R:replica)
 axiom [single_leader] leader(R) <-> R = lead
@@ -304,8 +304,8 @@ invariant [lead_gap_commits]
 # Safety property
 invariant [consistency]
     forall V1:value, V2:value, I:seq_t. (
-        (exists Q:quorum. (member(lead, Q) &
-            (forall R:replica. member(R, Q) -> m_request_reply(R, V1, I)))) &
-        (exists Q:quorum. (member(lead, Q) &
-            (forall R:replica. member(R, Q) -> m_request_reply(R, V2, I))))
+        (exists Q:quorum. member(lead, Q) &
+            forall R:replica. member(R, Q) -> m_request_reply(R, V1, I)) &
+        (exists Q:quorum. member(lead, Q) &
+            forall R:replica. member(R, Q) -> m_request_reply(R, V2, I))
         ) -> V1 = V2
