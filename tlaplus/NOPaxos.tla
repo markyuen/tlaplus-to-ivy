@@ -696,6 +696,35 @@ LeadGapCommits ==
                \/ m.slotNumber # n
                \/ vLog[r][m.slotNumber] = NoOp
 
+LogSMN ==
+   \A r \in Replicas :
+      \A n \in (vSessMsgNum[r]..(vSessMsgNum[r] + 3)) :
+         Len(vLog[r]) < n
+
+LogSMNGap ==
+   LET leaders == {r \in Replicas : Leader(vViewID[r]) = r}
+       mGaps == {m \in messages : m.mtype = MGapCommit}
+   IN \A r \in leaders :
+         \A n \in ((vSessMsgNum[r] + 1)..(vSessMsgNum[r] + 3)) :
+            \A m \in {m \in mGaps : m.dest = r /\ m.viewID = vViewID[r]} :
+               m.slotNumber # n
+
+ReplySMN ==
+   LET mReqReps == {m \in messages : m.mtype = MRequestReply}
+   IN \A m \in mReqReps : m.logSlotNum < vSessMsgNum[m.sender]
+
+LeaderSMNGap ==
+   LET leaders == {r \in Replicas : Leader(vViewID[r]) = r}
+       mGaps == {m \in messages : m.mtype = MGapCommit}
+   IN \A r \in leaders :
+         LET a == {m \in mGaps : m.dest = r /\ m.viewID = vViewID[r]}
+             b == {m.slotNumber : m \in a}
+             c == {m \in b : m = Max(b)}
+             d == {m \in c : m = vSessMsgNum[r]}
+         IN \A n \in d :
+            /\ vReplicaStatus[r] = StGapCommit
+            /\ vCurrentGapSlot[r] = n
+
 \* Conjunction of invariants
 IvyInvariants ==
    /\ ClientNoOp
@@ -704,6 +733,10 @@ IvyInvariants ==
    /\ LogNonTrivial
    /\ ValidSessMsgNum
    /\ LeadGapCommits
+   /\ LogSMN
+   /\ LogSMNGap
+   /\ ReplySMN
+   /\ LeaderSMNGap
 
 \* To constrain search space
 MsgCountLimit == Cardinality(messages) <= 12

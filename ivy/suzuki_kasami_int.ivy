@@ -141,7 +141,7 @@ invariant [allowed_in_crit]
 invariant [unique_tokens]
     (t_for(I, N) & t_for(I, M)) -> N = M
 
-# Affirms that each current node seq token corresponds to a token message, bar
+# Affirms that each current node token seq corresponds to a token message, bar
 # the initial state with 0
 invariant [corresponding_tokens]
     n_token_seq(N) ~= 0 -> t_for(n_token_seq(N), N)
@@ -174,3 +174,7 @@ invariant [no_request_to_self]
 # # i.e. no privilege message is sent to oneself
 # invariant [no_consecutive_privilege]
 #     (t_for(I, N) & J = I + 1 & t_for(J, M)) -> N ~= M
+
+# # Affirms that all prior token seqs were consumed
+# invariant [token_relation]
+#     (t_for(I, N) & t_for(J, M) & I < J) -> I <= n_token_seq(N)

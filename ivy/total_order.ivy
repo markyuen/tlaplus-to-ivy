@@ -11,14 +11,13 @@ module total_order(carrier) = {
     axiom [less_than] lt(X, Y) <-> (le(X, Y) & X ~= Y)
 
     relation successive(X:carrier, Y:carrier)  # X + 1 = Y
-    axiom [is_successive]
-        successive(X, Y) <->
-            (le(X, Y) & X ~= Y & ((le(X, Z) & X ~= Z) -> le(Y, Z)))
+    definition [successive_def]
+        successive(X, Y) = lt(X, Y) & (forall Z. lt(X, Z) -> le(Y, Z))
     
     individual zero : carrier
     axiom [val_zero] le(zero, X)
 
     action succ(x:carrier) returns (y:carrier) = {
-        assume successive(x, y)
+        assume successive(x, y);
     }
 }

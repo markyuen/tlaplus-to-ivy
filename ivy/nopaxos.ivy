@@ -9,7 +9,7 @@ include total_order
 # Stratification graph:
 #
 # quorum_intersection : quorum -> replica
-# consistincy : value, seq_t, quorum -> replica
+# consistency : value, seq_t, quorum -> replica
 #
 # Topological sort:
 type r_state = { st_normal, st_gap_commit, st_view_change }
@@ -87,11 +87,9 @@ action replace_item(r:replica, i:seq_t, v:value) = {
     if some len:seq_t. r_log_len(r, len) {
         if seq.le(i, seq.succ(len)) {
             if i = seq.succ(len) {
-                r_log_len(r, len) := false;
-                r_log_len(r, i) := true;
+                r_log_len(r, I) := I = i;
             }
-            r_log(r, i, V) := false;
-            r_log(r, i, v) := true;
+            r_log(r, i, V) := V = v;
         }
     }
 }
@@ -101,11 +99,9 @@ action send_gap_commit(r:replica) = {
         ensure leader(r);
         ensure r_replica_status(r, st_normal);
         var slot := seq.succ(len);
-        r_replica_status(r, st_normal) := false;
-        r_replica_status(r, st_gap_commit) := true;
+        r_replica_status(r, S) := S = st_gap_commit;
         r_gap_commit_reps(r, P) := false;
-        r_current_gap_slot(r, I) := false;
-        r_current_gap_slot(r, slot) := true;
+        r_current_gap_slot(r, I) := I = slot;
         m_gap_commit(R, slot) := true;
     }
 }
@@ -124,8 +120,7 @@ export action handle_client_request(m_value:value, s:seq_t) = {
     require m_client_request(m_value);
     if some slot:seq_t. s_seq_msg_num(s, slot) {
         m_marked_client_request(R, m_value, slot) := true;
-        s_seq_msg_num(s, slot) := false;
-        s_seq_msg_num(s, seq.succ(slot)) := true;
+        s_seq_msg_num(s, I) := I = seq.succ(slot);
     }
 }
 
@@ -137,11 +132,9 @@ export action handle_marked_client_request(
         if some smn:seq_t. r_sess_msg_num(r, smn) {
             require r_replica_status(r, st_normal);
             if m_sess_msg_num = smn {
-                r_log_len(r, len) := false;
-                r_log_len(r, smn) := true;
+                r_log_len(r, I) := I = smn;
                 r_log(r, smn, m_value) := true;
-                r_sess_msg_num(r, smn) := false;
-                r_sess_msg_num(r, seq.succ(smn)) := true;
+                r_sess_msg_num(r, I) := I = seq.succ(smn);
                 m_request_reply(r, m_value, smn) := true;
             }
             # Note: we ignore the session terminated case
@@ -191,13 +184,24 @@ export action handle_gap_commit(r:replica, m_slot_num:seq_t) = {
                 r_replica_status(r, st_gap_commit);
             call replace_item(r, m_slot_num, no_op);
             if seq.lt(len, m_slot_num) {
-                r_sess_msg_num(r, smn) := false;
-                r_sess_msg_num(r, seq.succ(smn)) := true;
+                r_sess_msg_num(r, I) := I = seq.succ(smn);
             }
             m_gap_commit_rep(lead, r, m_slot_num) := true;
             m_request_reply(r, no_op, m_slot_num) := true;
         }
     }
+}
+
+# Not part of the original protocol -- this is added simply to make writing
+# the inductive invariant easier. This condition always holds in an actual
+# execution before the replica status can be returned to normal. The reason
+# why is because for the recipient -- the leader -- to be part of the quorum,
+# it must have gone through the handle_gap_commit handler, incrementing its
+# sess msg num beyond the current gap slot. This condition is extracted to
+# this `before` construct simply for clarity -- there is no real operational
+# difference in this placement.
+before handle_gap_commit_rep(r:replica, m_sender:replica, m_slot_num:seq_t) {
+    require r_sess_msg_num(r, I) & seq.lt(m_slot_num, I);
 }
 
 export action handle_gap_commit_rep(
@@ -208,10 +212,9 @@ export action handle_gap_commit_rep(
     require leader(r);
     require r_current_gap_slot(r, m_slot_num);
     r_gap_commit_reps(r, m_sender) := true;
-    if exists Q:quorum.
-        (forall P:replica. member(P, Q) -> r_gap_commit_reps(r, P)) {
-        r_replica_status(r, st_gap_commit) := false;
-        r_replica_status(r, st_normal) := true;
+    if exists Q:quorum. forall P:replica.
+        (member(r, Q) & member(P, Q)) -> r_gap_commit_reps(r, P) {
+        r_replica_status(r, S) := S = st_normal;
     }
 }
 
@@ -300,6 +303,31 @@ invariant [lead_gap_commits]
     forall R:replica, I:seq_t, J:seq_t.
         (leader(R) & r_log_len(R, I) & seq.le(J, I)) ->
             (~m_gap_commit(R, J) | r_log(R, J, no_op))
+
+# The log is empty beginning from sess msg num
+invariant [log_smn]
+    forall R:replica, I:seq_t, J:seq_t, V:value.
+        (r_sess_msg_num(R, I) & seq.le(I, J)) -> ~r_log(R, J, V)
+
+# The leader's log has no gap commits beyond sess msg num
+invariant [log_smn_gap]
+    forall R:replica, I:seq_t, J:seq_t.
+        (leader(R) & r_sess_msg_num(R, I) & seq.lt(I, J)) ->
+            ~m_gap_commit(R, J)
+
+# A replica's sess msg num must be greater than anything it's replied for
+invariant [reply_smn]
+    forall R:replica, I:seq_t, J:seq_t, V:value.
+        m_request_reply(R, V, I) & r_sess_msg_num(R, J) -> seq.lt(I, J)
+
+# When the leader's sess msg num and gap commit coincide, the status must be
+# in gap commit, after exiting gap commit status, the leader must have
+# incremented its sess msg num (handle_gap_commit)
+invariant [leader_smn_gap]
+    forall R:replica, I:seq_t, J:seq_t.
+        (leader(R) & r_sess_msg_num(R, I) &
+        m_gap_commit(R, I) & m_gap_commit(R, J) & seq.le(J, I)) ->
+            (r_replica_status(R, st_gap_commit) & r_current_gap_slot(R, I))
 
 # Safety property
 invariant [consistency]
